@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Interest Capture Extension",
+  "version": "1.0.0",
+  "description": "Minimal Chrome extension for capturing user interests with Google Sign-In",
+  "permissions": [
+    "identity",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*"
+  ],
+  "oauth2": {
+    "client_id": "273799324150-0l8rqlkv2fmqicq84kp0vjffqe3tpfrj.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Interest Capture"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
