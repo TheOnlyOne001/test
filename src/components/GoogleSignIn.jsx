@@ -2,7 +2,7 @@
 // Simplified Google Sign-In component
 
 import React, { useState } from 'react';
-import authService from '../services/authService.js';
+import authService from '../services/authServiceFixed.js';
 
 export default function GoogleSignIn({ onSignIn, onError }) {
   const [isSigningIn, setIsSigningIn] = useState(false);

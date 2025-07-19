@@ -1,11 +1,21 @@
-// src/services/authService.js
-// Chrome Extension ONLY authentication service
+// Alternative authentication service using launchWebAuthFlow
+// This method works with regular Web Application OAuth2 clients
 
-class AuthService {
+class AuthServiceWebFlow {
   constructor() {
     this.user = null;
     this.isAuthenticated = false;
     this.listeners = new Set();
+    
+    // OAuth2 configuration
+    this.clientId = '40457641970-jtagtnt62rnvi1o9u2g9d4tti3f5qpr7.apps.googleusercontent.com';
+    this.redirectUrl = chrome.identity.getRedirectURL();
+    this.authUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
+    this.tokenUrl = 'https://oauth2.googleapis.com/token';
+    this.scopes = [
+      'https://www.googleapis.com/auth/userinfo.profile',
+      'https://www.googleapis.com/auth/userinfo.email'
+    ];
   }
 
   addListener(callback) {
@@ -41,42 +51,76 @@ class AuthService {
   }
 
   async signInWithGoogle() {
-    console.log('🔐 Starting Chrome Extension Google Sign-In...');
+    console.log('🔐 Starting Chrome Extension Google Sign-In with WebAuthFlow...');
+    console.log('📎 Redirect URL:', this.redirectUrl);
     
     try {
-      // First, clear any cached tokens to avoid conflicts
-      await this.clearCachedTokens();
+      // Step 1: Generate random state for CSRF protection
+      const state = this.generateRandomString();
       
-      // Use Chrome Identity API - the ONLY method that works for Chrome extensions
-      const token = await new Promise((resolve, reject) => {
-        console.log('📱 Requesting Chrome Identity token...');
-        
-        chrome.identity.getAuthToken({ 
-          interactive: true,
-          scopes: [
-            'https://www.googleapis.com/auth/userinfo.profile',
-            'https://www.googleapis.com/auth/userinfo.email'
-          ]
-        }, (token) => {
-          if (chrome.runtime.lastError) {
-            console.error('❌ Chrome Identity API error:', chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
-          } else if (!token) {
-            console.error('❌ No token received');
-            reject(new Error('No token received from Chrome Identity API'));
-          } else {
-            console.log('✅ Token received successfully');
-            resolve(token);
-          }
-        });
+      // Step 2: Construct authorization URL
+      const authParams = new URLSearchParams({
+        client_id: this.clientId,
+        response_type: 'code',
+        redirect_uri: this.redirectUrl,
+        scope: this.scopes.join(' '),
+        state: state,
+        access_type: 'offline',
+        prompt: 'consent'
       });
-
-      // Fetch user profile using the token
-      console.log('👤 Fetching user profile...');
-      const userProfile = await this.fetchUserProfile(token);
       
-      // Save user data
-      this.user = { ...userProfile, token };
+      const authFullUrl = `${this.authUrl}?${authParams.toString()}`;
+      console.log('🔗 Auth URL:', authFullUrl);
+      
+      // Step 3: Launch web auth flow
+      const responseUrl = await new Promise((resolve, reject) => {
+        chrome.identity.launchWebAuthFlow(
+          {
+            url: authFullUrl,
+            interactive: true
+          },
+          (responseUrl) => {
+            if (chrome.runtime.lastError) {
+              console.error('❌ WebAuthFlow error:', chrome.runtime.lastError);
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!responseUrl) {
+              reject(new Error('No response URL received'));
+            } else {
+              console.log('✅ Response URL received:', responseUrl);
+              resolve(responseUrl);
+            }
+          }
+        );
+      });
+      
+      // Step 4: Extract authorization code from response
+      const url = new URL(responseUrl);
+      const code = url.searchParams.get('code');
+      const returnedState = url.searchParams.get('state');
+      
+      if (!code) {
+        throw new Error('No authorization code received');
+      }
+      
+      if (returnedState !== state) {
+        throw new Error('State mismatch - possible CSRF attack');
+      }
+      
+      console.log('✅ Authorization code received');
+      
+      // Step 5: Exchange code for tokens
+      const tokens = await this.exchangeCodeForTokens(code);
+      console.log('✅ Tokens received');
+      
+      // Step 6: Fetch user profile
+      const userProfile = await this.fetchUserProfile(tokens.access_token);
+      
+      // Step 7: Save user data
+      this.user = { 
+        ...userProfile, 
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token
+      };
       this.isAuthenticated = true;
 
       // Store in Chrome storage
@@ -96,7 +140,7 @@ class AuthService {
       return { 
         success: true, 
         user: this.user,
-        method: 'Chrome Identity API'
+        method: 'Chrome Identity WebAuthFlow'
       };
 
     } catch (error) {
@@ -107,6 +151,31 @@ class AuthService {
         details: error
       };
     }
+  }
+
+  async exchangeCodeForTokens(code) {
+    const tokenParams = new URLSearchParams({
+      code: code,
+      client_id: this.clientId,
+      client_secret: '', // For installed apps, this can be empty
+      redirect_uri: this.redirectUrl,
+      grant_type: 'authorization_code'
+    });
+
+    const response = await fetch(this.tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: tokenParams.toString()
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Token exchange failed: ${error}`);
+    }
+
+    return await response.json();
   }
 
   async fetchUserProfile(token) {
@@ -143,34 +212,9 @@ class AuthService {
     }
   }
 
-  async clearCachedTokens() {
-    return new Promise((resolve) => {
-      console.log('🧹 Clearing cached tokens...');
-      chrome.identity.clearAllCachedAuthTokens(() => {
-        console.log('✅ All cached tokens cleared');
-        resolve();
-      });
-    });
-  }
-
   async signOut() {
     try {
       console.log('👋 Starting sign out...');
-      
-      // Remove cached token
-      if (this.user?.token) {
-        await new Promise((resolve) => {
-          chrome.identity.removeCachedAuthToken({
-            token: this.user.token
-          }, () => {
-            console.log('✅ Cached token removed');
-            resolve();
-          });
-        });
-      }
-
-      // Clear all cached tokens
-      await this.clearCachedTokens();
 
       // Clear storage
       await new Promise((resolve) => {
@@ -207,12 +251,19 @@ class AuthService {
     return this.isAuthenticated;
   }
 
+  generateRandomString() {
+    const array = new Uint32Array(28);
+    crypto.getRandomValues(array);
+    return Array.from(array, dec => ('0' + dec.toString(16)).substr(-2)).join('');
+  }
+
   // Debug method to check extension setup
   async debugInfo() {
     const manifest = chrome.runtime.getManifest();
     const info = {
       extensionId: chrome.runtime.id,
       manifestVersion: manifest.manifest_version,
+      redirectUrl: this.redirectUrl,
       permissions: manifest.permissions,
       oauth2: manifest.oauth2,
       chromeIdentityAvailable: !!chrome.identity,
@@ -224,4 +275,4 @@ class AuthService {
   }
 }
 
-export default new AuthService();
+export default new AuthServiceWebFlow();

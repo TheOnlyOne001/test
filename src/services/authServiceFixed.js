@@ -1,7 +1,7 @@
-// src/services/authService.js
-// Chrome Extension ONLY authentication service
+// Chrome Extension OAuth service - Fixed version for Chrome Extension OAuth clients
+// This version properly handles Chrome Extension OAuth without redirect URIs
 
-class AuthService {
+class AuthServiceFixed {
   constructor() {
     this.user = null;
     this.isAuthenticated = false;
@@ -44,25 +44,44 @@ class AuthService {
     console.log('🔐 Starting Chrome Extension Google Sign-In...');
     
     try {
-      // First, clear any cached tokens to avoid conflicts
+      // First, verify the extension setup
+      const debugInfo = await this.debugInfo();
+      console.log('📋 Extension Info:', debugInfo);
+
+      // Clear any cached tokens to avoid conflicts
       await this.clearCachedTokens();
       
-      // Use Chrome Identity API - the ONLY method that works for Chrome extensions
+      // For Chrome Extension OAuth, we must use getAuthToken
+      // The key is to ensure the manifest.json has the correct oauth2 configuration
       const token = await new Promise((resolve, reject) => {
         console.log('📱 Requesting Chrome Identity token...');
         
+        // Use getAuthToken without scopes in the call
+        // Scopes should be defined in manifest.json
         chrome.identity.getAuthToken({ 
-          interactive: true,
-          scopes: [
-            'https://www.googleapis.com/auth/userinfo.profile',
-            'https://www.googleapis.com/auth/userinfo.email'
-          ]
+          interactive: true
         }, (token) => {
           if (chrome.runtime.lastError) {
             console.error('❌ Chrome Identity API error:', chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
+            
+            // If we get the "OAuth2 not granted" error, try to remove cached token and retry
+            if (chrome.runtime.lastError.message.includes('OAuth2 not granted')) {
+              console.log('🔄 Attempting to clear cache and retry...');
+              chrome.identity.clearAllCachedAuthTokens(() => {
+                chrome.identity.getAuthToken({ interactive: true }, (retryToken) => {
+                  if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                  } else if (!retryToken) {
+                    reject(new Error('No token received on retry'));
+                  } else {
+                    resolve(retryToken);
+                  }
+                });
+              });
+            } else {
+              reject(new Error(chrome.runtime.lastError.message));
+            }
           } else if (!token) {
-            console.error('❌ No token received');
             reject(new Error('No token received from Chrome Identity API'));
           } else {
             console.log('✅ Token received successfully');
@@ -96,14 +115,28 @@ class AuthService {
       return { 
         success: true, 
         user: this.user,
-        method: 'Chrome Identity API'
+        method: 'Chrome Identity API (Chrome Extension)'
       };
 
     } catch (error) {
       console.error('❌ Authentication failed:', error);
+      
+      // Provide specific guidance based on the error
+      let errorMessage = error.message;
+      let helpText = '';
+      
+      if (error.message.includes('invalid_request')) {
+        helpText = 'Make sure the extension ID in Google Cloud Console matches your actual extension ID.';
+      } else if (error.message.includes('OAuth2 not granted')) {
+        helpText = 'The OAuth consent screen may need to be configured or the app needs to be verified.';
+      } else if (error.message.includes('invalid_client')) {
+        helpText = 'The OAuth2 client configuration may be incorrect. Check the client ID in manifest.json.';
+      }
+      
       return {
         success: false,
-        error: `Authentication failed: ${error.message}`,
+        error: errorMessage,
+        help: helpText,
         details: error
       };
     }
@@ -216,12 +249,24 @@ class AuthService {
       permissions: manifest.permissions,
       oauth2: manifest.oauth2,
       chromeIdentityAvailable: !!chrome.identity,
-      storageAvailable: !!chrome.storage
+      storageAvailable: !!chrome.storage,
+      expectedExtensionId: 'ciimjbfhdkddbbbefecchngmdklpbpmb'
     };
     
     console.log('🔍 Extension Debug Info:', info);
+    
+    // Check if extension ID matches
+    if (info.extensionId !== info.expectedExtensionId) {
+      console.warn('⚠️ Extension ID mismatch! Expected:', info.expectedExtensionId, 'Got:', info.extensionId);
+    }
+    
+    // Check OAuth2 configuration
+    if (!info.oauth2 || !info.oauth2.client_id) {
+      console.warn('⚠️ OAuth2 configuration missing in manifest.json!');
+    }
+    
     return info;
   }
 }
 
-export default new AuthService();
+export default new AuthServiceFixed();

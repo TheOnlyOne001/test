@@ -13,8 +13,11 @@
     "https://www.googleapis.com/*"
   ],
   "oauth2": {
-    "client_id": "273799324150-0l8rqlkv2fmqicq84kp0vjffqe3tpfrj.apps.googleusercontent.com",
-    "scopes": ["https://www.googleapis.com/auth/userinfo.profile", "https://www.googleapis.com/auth/userinfo.email"]
+    "client_id": "40457641970-jtagtnt62rnvi1o9u2g9d4tti3f5qpr7.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.profile",
+      "https://www.googleapis.com/auth/userinfo.email"
+    ]
   },
   "action": {
     "default_popup": "popup.html",

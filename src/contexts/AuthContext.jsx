@@ -2,7 +2,7 @@
 // Simplified authentication context for minimal extension
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import authService from '../services/authService.js';
+import authService from '../services/authServiceFixed.js';
 
 const AuthContext = createContext();
 
